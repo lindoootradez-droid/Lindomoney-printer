@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Printer — Trade Journal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- ============================================================
+     FIREBASE — compat SDK, loaded from Google's CDN.
+     Your trades live in Firestore (the cloud), not in the
+     browser, so nothing piles up locally.
+     ============================================================ -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<style>
+  :root{
+    --bg:#000000;
+    --surface:#0A0A0A;
+    --surface-2:#141414;
+    --border:#262626;
+    --text:#E7E9ED;
+    --text-dim:#8A93A3;
+    --text-faint:#5A6272;
+    --accent:#FF7A1A;
+    --accent-dim:#B85610;
+    --win:#00FF00;
+    --win-dim:#0F2E12;
+    --loss:#FF2424;
+    --loss-dim:#3A1212;
+    --missed:#D4A15F;
+    --missed-dim:#332A17;
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);color:var(--text);font-family:'Sora',sans-serif;
+    -webkit-font-smoothing:antialiased;min-height:100vh;
+  }
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  a{color:inherit;}
+
+  .shell{max-width:1180px;margin:0 auto;padding:0 28px 80px;}
+  header.top{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:26px 0 22px;border-bottom:1px solid var(--border);margin-bottom:26px;
+  }
+  .brand{display:flex;align-items:baseline;gap:10px;}
+  .brand .mark{width:9px;height:9px;background:var(--accent);display:inline-block;border-radius:1px;transform:rotate(45deg);}
+  .brand h1{font-size:19px;font-weight:600;margin:0;letter-spacing:0.2px;}
+  .brand .sub{color:var(--text-faint);font-size:12.5px;font-family:'IBM Plex Mono',monospace;}
+  .top-actions{display:flex;gap:10px;align-items:center;}
+  .user-chip{font-size:12px;color:var(--text-faint);font-family:'IBM Plex Mono',monospace;padding:8px 4px;}
+
+  button{font-family:'Sora',sans-serif;cursor:pointer;border:none;border-radius:var(--radius);font-size:13.5px;font-weight:500;transition:background .15s ease,border-color .15s ease,opacity .15s ease;}
+  .btn-primary{background:var(--accent);color:#1A0900;padding:9px 16px;}
+  .btn-primary:hover{background:#FF9142;}
+  .btn-primary:disabled{opacity:0.5;cursor:default;}
+  .btn-ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border);padding:8px 14px;}
+  .btn-ghost:hover{color:var(--text);border-color:var(--text-faint);}
+  .btn-icon{background:transparent;color:var(--text-faint);border:none;font-size:16px;padding:2px 6px;}
+  .btn-icon:hover{color:var(--loss);}
+
+  /* stat strip */
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:24px;background:var(--surface);}
+  .stat{padding:16px 18px;border-right:1px solid var(--border);}
+  .stat:last-child{border-right:none;}
+  .stat .label{font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:7px;}
+  .stat .value{font-size:20px;font-weight:600;font-family:'IBM Plex Mono',monospace;}
+  .stat .value.win{color:var(--win);}
+  .stat .value.loss{color:var(--loss);}
+  .stat .sub{font-size:11px;color:var(--text-faint);margin-top:4px;font-family:'IBM Plex Mono',monospace;}
+  @media (max-width:860px){
+    .stats{grid-template-columns:repeat(2,1fr);}
+    .stat{border-right:1px solid var(--border);border-bottom:1px solid var(--border);}
+    .stat:nth-child(2n){border-right:none;}
+  }
+
+  /* calendar panel */
+  .panel{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);margin-bottom:24px;}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);}
+  .panel-head h2{font-size:14px;font-weight:600;margin:0;}
+  .month-nav{display:flex;align-items:center;gap:14px;}
+  .month-nav button{background:var(--surface-2);border:1px solid var(--border);color:var(--text-dim);width:26px;height:26px;border-radius:var(--radius);font-size:13px;}
+  .month-nav button:hover{color:var(--text);}
+  .month-label{font-family:'IBM Plex Mono',monospace;font-size:13px;min-width:120px;text-align:center;}
+  .month-pnl{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--text-faint);}
+  .month-pnl .amt{font-weight:600;}
+
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr) 1.15fr;}
+  .cal-dow{padding:10px 8px;text-align:center;font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);}
+  .cal-cell{
+    min-height:78px;padding:8px 9px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);
+    cursor:pointer;position:relative;transition:background .12s ease;
+  }
+  .cal-cell:hover{background:var(--surface-2);}
+  .cal-cell.empty{cursor:default;background:#0E1218;}
+  .cal-cell.empty:hover{background:#0E1218;}
+  .cal-cell.selected{outline:1.5px solid var(--accent);outline-offset:-1.5px;}
+  .cal-cell .daynum{font-size:11.5px;color:var(--text-faint);font-family:'IBM Plex Mono',monospace;}
+  .cal-cell.win{background:var(--win-dim);}
+  .cal-cell.win:hover{background:#154018;}
+  .cal-cell.loss{background:var(--loss-dim);}
+  .cal-cell.loss:hover{background:#4a1818;}
+  .cal-cell.missed{background:var(--missed-dim);}
+  .cal-cell.missed:hover{background:#3f331d;}
+  .cal-cell.missed .daypnl{color:var(--missed);}
+  .cal-cell .daypnl{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:13px;margin-top:14px;}
+  .cal-cell.win .daypnl{color:var(--win);}
+  .cal-cell.loss .daypnl{color:var(--loss);}
+  .cal-cell .daycount{font-size:10.5px;color:var(--text-faint);margin-top:2px;font-family:'IBM Plex Mono',monospace;}
+  .week-cell{
+    min-height:78px;padding:10px 12px;border-bottom:1px solid var(--border);
+    background:var(--surface-2);display:flex;flex-direction:column;justify-content:center;
+  }
+  .week-cell .wk-label{font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;}
+  .week-cell .wk-pnl{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:14px;margin-top:4px;}
+  .week-cell .wk-pnl.win{color:var(--win);}
+  .week-cell .wk-pnl.loss{color:var(--loss);}
+  .week-cell .wk-count{font-size:10.5px;color:var(--text-faint);margin-top:2px;font-family:'IBM Plex Mono',monospace;}
+  @media (max-width:760px){
+    .cal-grid{grid-template-columns:repeat(7,1fr);}
+    .week-cell{display:none;}
+    .cal-cell{min-height:56px;}
+  }
+
+  /* day detail */
+  .day-list{padding:4px 0;}
+  .day-empty{padding:34px 20px;text-align:center;color:var(--text-faint);font-size:13px;}
+  .trade-card{padding:16px 20px;border-bottom:1px solid var(--border);}
+  .trade-card:last-child{border-bottom:none;}
+  .tc-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:2px;font-size:11px;font-family:'IBM Plex Mono',monospace;font-weight:600;letter-spacing:0.3px;}
+  .pill.long{background:var(--win-dim);color:var(--win);}
+  .pill.short{background:var(--loss-dim);color:var(--loss);}
+  .pill.missed{background:var(--missed-dim);color:var(--missed);}
+  .pill.inst{background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border);}
+  .tc-time{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-faint);}
+  .tc-pnl{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:15px;margin-left:auto;}
+  .tc-pnl.win{color:var(--win);}
+  .tc-pnl.loss{color:var(--loss);}
+  .tc-meta{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:12.5px;color:var(--text-dim);}
+  .tc-meta .k{color:var(--text-faint);margin-right:5px;}
+  .tc-notes{font-size:13px;line-height:1.55;color:var(--text-dim);white-space:pre-wrap;margin-bottom:10px;}
+  .tc-shots{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+  .tc-shots img{width:100px;height:74px;object-fit:cover;border-radius:2px;border:1px solid var(--border);cursor:zoom-in;}
+  .tc-actions{display:flex;gap:8px;justify-content:flex-end;}
+
+  .overlay{position:fixed;inset:0;background:rgba(6,8,11,0.72);display:none;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;z-index:50;}
+  .overlay.open{display:flex;}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);width:100%;max-width:580px;}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);}
+  .modal-head h3{margin:0;font-size:15px;font-weight:600;}
+  .modal-body{padding:22px;}
+  .field{margin-bottom:16px;}
+  .field-row{display:flex;gap:14px;}
+  .field-row .field{flex:1;}
+  label{display:block;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:7px;font-weight:500;}
+  input[type=text],input[type=number],input[type=date],input[type=time],input[type=email],input[type=password],textarea,select{
+    width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:var(--radius);font-family:'IBM Plex Mono',monospace;font-size:13.5px;
+  }
+  select{font-family:'Sora',sans-serif;appearance:none;}
+  textarea{font-family:'Sora',sans-serif;resize:vertical;min-height:70px;line-height:1.5;}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent-dim);}
+  .dir-toggle{display:flex;gap:8px;}
+  .dir-btn{flex:1;padding:9px;text-align:center;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);color:var(--text-faint);font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;cursor:pointer;}
+  .dir-btn.active.long{border-color:var(--win);color:var(--win);background:var(--win-dim);}
+  .dir-btn.active.short{border-color:var(--loss);color:var(--loss);background:var(--loss-dim);}
+  .dir-btn.active.missed{border-color:var(--missed);color:var(--missed);background:var(--missed-dim);}
+  .paste-zone{
+    border:1px dashed var(--border);border-radius:var(--radius);padding:20px;text-align:center;
+    color:var(--text-faint);font-size:12.5px;cursor:text;
+  }
+  .paste-zone:focus{outline:none;border-color:var(--accent-dim);color:var(--text-dim);}
+  .paste-zone .icon{font-size:18px;display:block;margin-bottom:6px;}
+  .shot-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+  .shot-thumb{position:relative;width:76px;height:76px;}
+  .shot-thumb img{width:100%;height:100%;object-fit:cover;border-radius:2px;border:1px solid var(--border);}
+  .shot-thumb .rm{
+    position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;
+    background:var(--loss);color:#fff;font-size:11px;line-height:18px;text-align:center;cursor:pointer;
+  }
+  .modal-foot{display:flex;justify-content:flex-end;align-items:center;gap:10px;padding:16px 22px;border-top:1px solid var(--border);}
+  .modal-error{font-size:12px;color:var(--loss);margin-right:auto;}
+
+  .lightbox{position:fixed;inset:0;background:rgba(6,8,11,0.9);display:none;align-items:center;justify-content:center;z-index:60;padding:30px;cursor:zoom-out;}
+  .lightbox.open{display:flex;}
+  .lightbox img{max-width:100%;max-height:100%;border-radius:4px;}
+
+  footer.hint-footer{text-align:center;color:var(--text-faint);font-size:11.5px;margin-top:6px;font-family:'IBM Plex Mono',monospace;}
+
+  #authScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .auth-card{width:100%;max-width:380px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);padding:30px 28px;}
+  .auth-card .brand{margin-bottom:22px;justify-content:center;}
+  .auth-card h2{font-size:15px;font-weight:600;margin:0 0 4px;text-align:center;}
+  .auth-card .tag{font-size:12.5px;color:var(--text-faint);text-align:center;margin-bottom:22px;}
+  .auth-toggle{display:flex;gap:0;margin-top:14px;justify-content:center;font-size:12.5px;color:var(--text-faint);}
+  .auth-toggle button{background:none;color:var(--accent);padding:0;margin-left:5px;}
+  #authError{color:var(--loss);font-size:12.5px;margin-top:10px;min-height:1em;}
+  #syncStatus{position:fixed;bottom:14px;right:18px;font-size:11px;color:var(--text-faint);font-family:'IBM Plex Mono',monospace;}
+  #syncStatus.saving{color:var(--accent);}
+  #configWarning{background:#3E1F1D;border:1px solid var(--loss);color:#F3B7B3;font-size:13px;padding:14px 18px;border-radius:var(--radius);margin-bottom:20px;line-height:1.5;}
+</style>
+</head>
+<body>
+
+<div id="authScreen">
+  <div class="auth-card">
+    <div class="brand"><span class="mark"></span><h1 style="font-size:19px;font-weight:600;margin:0;">Printer</h1></div>
+    <h2 id="authTitle">Sign in</h2>
+    <div class="tag">Your journal, synced to the cloud</div>
+    <div id="configWarning" style="display:none;"></div>
+    <div class="field"><label>Email</label><input type="text" id="auth-email" placeholder="you@example.com"></div>
+    <div class="field"><label>Password</label><input type="password" id="auth-password" placeholder="At least 6 characters"></div>
+    <button class="btn-primary" id="authSubmit" style="width:100%;padding:11px;">Sign in</button>
+    <div id="authError"></div>
+    <div class="auth-toggle">
+      <span id="authToggleLabel">Don't have an account?</span>
+      <button id="authToggleBtn">Create one</button>
+    </div>
+  </div>
+</div>
+
+<div class="shell" id="appShell" style="display:none;">
+  <header class="top">
+    <div class="brand"><span class="mark"></span><h1>Printer</h1><span class="sub">/ trade journal</span></div>
+    <div class="top-actions">
+      <span class="user-chip" id="userChip"></span>
+      <button class="btn-ghost" id="signOutBtn">Sign out</button>
+      <button class="btn-primary" id="newTradeBtn">+ Log trade</button>
+    </div>
+  </header>
+
+  <section class="stats" id="statsStrip"></section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="month-nav">
+        <button id="prevMonth">‹</button>
+        <span class="month-label" id="monthLabel"></span>
+        <button id="nextMonth">›</button>
+        <button id="todayBtn" style="width:auto;padding:0 10px;font-size:11px;">Today</button>
+      </div>
+      <span class="month-pnl" id="monthPnl"></span>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 id="dayHeading">Select a day</h2>
+      <span class="hint mono" id="dayHint" style="font-size:11.5px;color:var(--text-faint);"></span>
+    </div>
+    <div id="dayList" class="day-list"></div>
+  </section>
+
+  <footer class="hint-footer">Synced to your account in the cloud — open this page from any device and sign in to see the same journal.</footer>
+</div>
+
+<div class="overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle">Log a trade</h3>
+      <button class="btn-icon" id="closeModal">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-row">
+        <div class="field"><label>Date</label><input type="date" id="f-date"></div>
+        <div class="field"><label>Time</label><input type="time" id="f-time"></div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Instrument</label>
+          <select id="f-instrument">
+            <option value="MNQ">MNQ</option>
+            <option value="MES">MES</option>
+            <option value="NQ">NQ</option>
+            <option value="ES">ES</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Direction</label>
+          <div class="dir-toggle">
+            <div class="dir-btn long" id="dirLong">LONG</div>
+            <div class="dir-btn short" id="dirShort">SHORT</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Outcome</label>
+        <div class="dir-toggle">
+          <div class="dir-btn" id="outcomeTaken">TAKEN</div>
+          <div class="dir-btn" id="outcomeMissed">MISSED ENTRY</div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field"><label>R:R</label><input type="number" step="any" id="f-rr" placeholder="e.g. 2.5"></div>
+        <div class="field" id="pnlField"><label>P&amp;L ($)</label><input type="number" step="any" id="f-pnl" placeholder="0.00"></div>
+      </div>
+
+      <div class="field-row">
+        <div class="field"><label>Strategy</label><input type="text" id="f-strategy" placeholder="e.g. ORB, VWAP reclaim..."></div>
+        <div class="field"><label>Entry trigger</label><input type="text" id="f-trigger" placeholder="e.g. 5m rejection, liquidity sweep..."></div>
+      </div>
+
+      <div class="field">
+        <label>Journal notes</label>
+        <textarea id="f-notes" placeholder="Thesis, what went right or wrong, lessons..."></textarea>
+      </div>
+
+      <div class="field">
+        <label>Screenshots</label>
+        <div class="paste-zone" id="pasteZone" tabindex="0">
+          <span class="icon">⎘</span>
+          Click here, then paste (Cmd/Ctrl+V) — you can paste more than one
+        </div>
+        <div class="shot-grid" id="shotGrid"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="modal-error" id="modalError"></span>
+      <button class="btn-ghost" id="cancelModal">Cancel</button>
+      <button class="btn-primary" id="saveTrade">Save trade</button>
+    </div>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox"><img id="lightboxImg"></div>
+<div id="syncStatus"></div>
+
+<script>
+/* ============================================================
+   1. FIREBASE CONFIG — paste your own project's config here.
+      Firebase Console → Project settings → Your apps → Web app.
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyACBk9ogZKgurfKF4YJv69ICQnUS7g-jFA",
+  authDomain: "lindoomoney-printer.firebaseapp.com",
+  projectId: "lindoomoney-printer",
+  storageBucket: "lindoomoney-printer.firebasestorage.app",
+  messagingSenderId: "894846501238",
+  appId: "1:894846501238:web:2af1ba01fc608463357a57",
+  measurementId: "G-6LP9C94ZKJ"
+};
+/* ============================================================ */
+
+(function(){
+  const $ = sel => document.querySelector(sel);
+  const isConfigured = !Object.values(firebaseConfig).some(v => String(v).startsWith('PASTE_'));
+
+  if(!isConfigured){
+    $('#configWarning').style.display = 'block';
+    $('#configWarning').textContent = 'This app has not been connected to a Firebase project yet. Open index.html, find "firebaseConfig" near the top of the script, and paste in your own project\'s config values. See the README for the full setup steps.';
+    $('#authSubmit').disabled = true;
+    return;
+  }
+
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  let trades = [];
+  let unsubscribe = null;
+  let mode = 'signin';
+  let direction = 'long';
+  let missed = false;
+  let editingId = null;
+  let pendingShots = [];
+  let calYear, calMonth; // 0-indexed month
+  let selectedDate = null;
+
+  const todayD = new Date();
+  calYear = todayD.getFullYear();
+  calMonth = todayD.getMonth();
+
+  const fmt = n => (n<0?'-':'') + '$' + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pad = n => String(n).padStart(2,'0');
+  const isoDate = (y,m,d) => `${y}-${pad(m+1)}-${pad(d)}`;
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  /* ---------- auth ---------- */
+  $('#authToggleBtn').addEventListener('click', ()=>{
+    mode = mode === 'signin' ? 'signup' : 'signin';
+    $('#authTitle').textContent = mode === 'signin' ? 'Sign in' : 'Create your account';
+    $('#authSubmit').textContent = mode === 'signin' ? 'Sign in' : 'Create account';
+    $('#authToggleLabel').textContent = mode === 'signin' ? "Don't have an account?" : 'Already have an account?';
+    $('#authToggleBtn').textContent = mode === 'signin' ? 'Create one' : 'Sign in';
+    $('#authError').textContent = '';
+  });
+  $('#authSubmit').addEventListener('click', async ()=>{
+    const email = $('#auth-email').value.trim();
+    const password = $('#auth-password').value;
+    $('#authError').textContent = '';
+    if(!email || !password){ $('#authError').textContent = 'Enter an email and password.'; return; }
+    try{
+      if(mode === 'signin') await auth.signInWithEmailAndPassword(email, password);
+      else await auth.createUserWithEmailAndPassword(email, password);
+    }catch(err){ $('#authError').textContent = err.message.replace('Firebase: ',''); }
+  });
+  $('#signOutBtn').addEventListener('click', ()=> auth.signOut());
+
+  auth.onAuthStateChanged(user=>{
+    if(user){
+      $('#authScreen').style.display = 'none';
+      $('#appShell').style.display = 'block';
+      $('#userChip').textContent = user.email;
+      listenToTrades(user.uid);
+    } else {
+      $('#authScreen').style.display = 'flex';
+      $('#appShell').style.display = 'none';
+      if(unsubscribe){ unsubscribe(); unsubscribe = null; }
+      trades = [];
+    }
+  });
+
+  function currentUid(){ return auth.currentUser ? auth.currentUser.uid : null; }
+  function setSyncStatus(text, sticky){
+    const el = $('#syncStatus');
+    el.textContent = text; el.classList.toggle('saving', !!sticky);
+    if(!sticky) setTimeout(()=>{ if(el.textContent===text) el.textContent=''; }, 1600);
+  }
+
+  function listenToTrades(uid){
+    if(unsubscribe) unsubscribe();
+    unsubscribe = db.collection('users').doc(uid).collection('trades')
+      .onSnapshot(snap=>{
+        trades = snap.docs.map(d=>({id:d.id, ...d.data()}));
+        renderAll();
+      }, err=>{ console.error(err); setSyncStatus('Sync error — check Firestore rules.', true); });
+  }
+
+  /* ---------- stats ---------- */
+  function computeStats(){
+    const taken = trades.filter(t=>!t.missed);
+    const missedCount = trades.filter(t=>t.missed).length;
+    const n = taken.length;
+    const pnl = taken.reduce((a,t)=>a+(t.pnl||0),0);
+    const wins = taken.filter(t=>t.pnl>0);
+    const losses = taken.filter(t=>t.pnl<0);
+    const winRate = n ? (wins.length/n*100) : 0;
+    const rrVals = taken.filter(t=>t.rr!=null && !isNaN(t.rr));
+    const avgRR = rrVals.length ? rrVals.reduce((a,t)=>a+Number(t.rr),0)/rrVals.length : null;
+    const grossWin = wins.reduce((a,t)=>a+t.pnl,0);
+    const grossLoss = Math.abs(losses.reduce((a,t)=>a+t.pnl,0));
+    const pf = grossLoss ? (grossWin/grossLoss) : (grossWin>0 ? Infinity : 0);
+    return {n,pnl,winRate,avgRR,pf,wins:wins.length,losses:losses.length,missedCount};
+  }
+  function renderStats(){
+    const s = computeStats();
+    const pfDisplay = s.pf===Infinity ? '∞' : s.pf.toFixed(2);
+    $('#statsStrip').innerHTML = `
+      <div class="stat"><div class="label">Net P&L</div><div class="value ${s.pnl>0?'win':s.pnl<0?'loss':''}">${s.n?fmt(s.pnl):'—'}</div><div class="sub">${s.n} trade${s.n===1?'':'s'}</div></div>
+      <div class="stat"><div class="label">Win rate</div><div class="value">${s.n?s.winRate.toFixed(1)+'%':'—'}</div><div class="sub">${s.wins}W / ${s.losses}L${s.missedCount?' · '+s.missedCount+' missed':''}</div></div>
+      <div class="stat"><div class="label">Profit factor</div><div class="value">${s.n?pfDisplay:'—'}</div><div class="sub">gross win / gross loss</div></div>
+      <div class="stat"><div class="label">Avg R:R</div><div class="value">${s.avgRR!=null?s.avgRR.toFixed(2):'—'}</div><div class="sub">across logged trades</div></div>
+      <div class="stat"><div class="label">This month</div><div class="value mono" id="statMonthPnl">—</div><div class="sub" id="statMonthCount"></div></div>
+    `;
+  }
+
+  /* ---------- calendar ---------- */
+  function tradesByDate(){
+    const map = {};
+    trades.forEach(t=>{ (map[t.date] = map[t.date] || []).push(t); });
+    return map;
+  }
+  function renderCalendar(){
+    const map = tradesByDate();
+    $('#monthLabel').textContent = `${monthNames[calMonth]} ${calYear}`;
+    const firstDow = new Date(calYear, calMonth, 1).getDay();
+    const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+
+    let monthPnl = 0, monthCount = 0;
+    Object.keys(map).forEach(d=>{
+      const dt = new Date(d+'T00:00:00');
+      if(dt.getFullYear()===calYear && dt.getMonth()===calMonth){
+        map[d].forEach(t=>{ if(!t.missed){ monthPnl += (t.pnl||0); monthCount++; } });
+      }
+    });
+    $('#monthPnl').innerHTML = monthCount ? `<span class="amt" style="color:${monthPnl>=0?'var(--win)':'var(--loss)'}">${fmt(monthPnl)}</span> · ${monthCount} trades` : 'No trades this month';
+    if($('#statMonthPnl')){
+      $('#statMonthPnl').textContent = monthCount ? fmt(monthPnl) : '—';
+      $('#statMonthPnl').className = 'value mono ' + (monthPnl>0?'win':monthPnl<0?'loss':'');
+      $('#statMonthCount').textContent = monthCount ? `${monthCount} trades` : '';
+    }
+
+    const dows = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+    let html = dows.map(d=>`<div class="cal-dow">${d}</div>`).join('') + `<div class="cal-dow"></div>`;
+
+    // build cells grouped into weeks
+    let cells = [];
+    for(let i=0;i<firstDow;i++) cells.push(null);
+    for(let d=1; d<=daysInMonth; d++) cells.push(d);
+    while(cells.length % 7 !== 0) cells.push(null);
+
+    for(let w=0; w<cells.length/7; w++){
+      const weekCells = cells.slice(w*7, w*7+7);
+      let weekPnl = 0, weekCount = 0, weekHasDay = false;
+      weekCells.forEach(d=>{
+        if(d==null) return;
+        weekHasDay = true;
+        const iso = isoDate(calYear, calMonth, d);
+        const dayTrades = map[iso] || [];
+        dayTrades.forEach(t=>{ if(!t.missed){ weekPnl += (t.pnl||0); weekCount++; } });
+      });
+      weekCells.forEach(d=>{
+        if(d==null){ html += `<div class="cal-cell empty"></div>`; return; }
+        const iso = isoDate(calYear, calMonth, d);
+        const dayTrades = map[iso] || [];
+        const takenTrades = dayTrades.filter(t=>!t.missed);
+        const missedTrades = dayTrades.filter(t=>t.missed);
+        const dayPnl = takenTrades.reduce((a,t)=>a+(t.pnl||0),0);
+        let cls = 'cal-cell';
+        if(takenTrades.length){ cls += dayPnl >= 0 ? ' win' : ' loss'; }
+        else if(missedTrades.length){ cls += ' missed'; }
+        if(selectedDate === iso) cls += ' selected';
+        let body = '';
+        if(takenTrades.length){
+          body = `<div class="daypnl">${fmt(dayPnl)}</div><div class="daycount">${takenTrades.length} trade${takenTrades.length===1?'':'s'}${missedTrades.length?' · '+missedTrades.length+' missed':''}</div>`;
+        } else if(missedTrades.length){
+          body = `<div class="daypnl">Missed</div><div class="daycount">${missedTrades.length} setup${missedTrades.length===1?'':'s'}</div>`;
+        }
+        html += `<div class="${cls}" data-date="${iso}">
+          <div class="daynum">${d}</div>
+          ${body}
+        </div>`;
+      });
+      if(weekHasDay){
+        html += `<div class="week-cell">
+          <div class="wk-label">Week ${w+1}</div>
+          <div class="wk-pnl ${weekCount ? (weekPnl>=0?'win':'loss') : ''}">${weekCount?fmt(weekPnl):'$0.00'}</div>
+          <div class="wk-count">${weekCount} trade${weekCount===1?'':'s'}</div>
+        </div>`;
+      } else {
+        html += `<div class="week-cell" style="visibility:hidden;"></div>`;
+      }
+    }
+    $('#calGrid').innerHTML = html;
+    $('#calGrid').querySelectorAll('.cal-cell[data-date]').forEach(c=>{
+      c.addEventListener('click', ()=>{ selectedDate = c.dataset.date; renderCalendar(); renderDay(); });
+    });
+  }
+
+  function renderDay(){
+    const map = tradesByDate();
+    if(!selectedDate){
+      $('#dayHeading').textContent = 'Select a day';
+      $('#dayHint').textContent = '';
+      $('#dayList').innerHTML = `<div class="day-empty">Click a day on the calendar to see its trades.</div>`;
+      return;
+    }
+    const dt = new Date(selectedDate+'T00:00:00');
+    $('#dayHeading').textContent = dt.toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric'});
+    const dayTrades = (map[selectedDate] || []).sort((a,b)=> (a.time||'').localeCompare(b.time||''));
+    $('#dayHint').textContent = dayTrades.length ? `${dayTrades.length} trade${dayTrades.length===1?'':'s'}` : '';
+    if(!dayTrades.length){
+      $('#dayList').innerHTML = `<div class="day-empty">No trades logged this day.<br><button class="btn-primary" id="addForSelected" style="margin-top:14px;">+ Log a trade for this day</button></div>`;
+      $('#addForSelected').addEventListener('click', ()=>openModal(null, selectedDate));
+      return;
+    }
+    $('#dayList').innerHTML = dayTrades.map(t=>{
+      const win = t.pnl > 0;
+      return `
+      <div class="trade-card">
+        <div class="tc-top">
+          ${t.time ? `<span class="tc-time">${t.time}</span>` : ''}
+          <span class="pill inst">${t.instrument||'—'}</span>
+          ${t.missed
+            ? `<span class="pill missed">MISSED ENTRY</span><span class="pill ${t.direction}">${(t.direction||'').toUpperCase()}</span>`
+            : `<span class="pill ${t.direction}">${(t.direction||'').toUpperCase()}</span><span class="tc-pnl ${win?'win':t.pnl<0?'loss':''}">${fmt(t.pnl||0)}</span>`
+          }
+        </div>
+        <div class="tc-meta">
+          ${t.rr!=null && t.rr!=='' ? `<span><span class="k">R:R</span>${t.rr}</span>` : ''}
+          ${t.strategy ? `<span><span class="k">Strategy</span>${escapeHtml(t.strategy)}</span>` : ''}
+          ${t.entryTrigger ? `<span><span class="k">Trigger</span>${escapeHtml(t.entryTrigger)}</span>` : ''}
+        </div>
+        ${t.notes ? `<div class="tc-notes">${escapeHtml(t.notes)}</div>` : ''}
+        ${(t.shots&&t.shots.length) ? `<div class="tc-shots">${t.shots.map(s=>`<img src="${s}" data-full="${s}">`).join('')}</div>` : ''}
+        <div class="tc-actions">
+          <button class="btn-ghost edit-btn" data-id="${t.id}">Edit</button>
+          <button class="btn-ghost del-btn" data-id="${t.id}">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    $('#dayList').querySelectorAll('.edit-btn').forEach(b=> b.addEventListener('click', ()=>openModal(b.dataset.id)));
+    $('#dayList').querySelectorAll('.del-btn').forEach(b=> b.addEventListener('click', async ()=>{
+      if(!confirm('Delete this trade?')) return;
+      const uid = currentUid(); if(!uid) return;
+      setSyncStatus('Deleting…', true);
+      await db.collection('users').doc(uid).collection('trades').doc(b.dataset.id).delete();
+      setSyncStatus('Deleted');
+    }));
+    $('#dayList').querySelectorAll('.tc-shots img').forEach(img=>{
+      img.addEventListener('click', ()=>{ $('#lightboxImg').src = img.dataset.full; $('#lightbox').classList.add('open'); });
+    });
+  }
+
+  function escapeHtml(s){ return String(s).replace(/</g,'&lt;'); }
+
+  function renderAll(){ renderStats(); renderCalendar(); renderDay(); }
+
+  $('#prevMonth').addEventListener('click', ()=>{ calMonth--; if(calMonth<0){calMonth=11;calYear--;} renderCalendar(); });
+  $('#nextMonth').addEventListener('click', ()=>{ calMonth++; if(calMonth>11){calMonth=0;calYear++;} renderCalendar(); });
+  $('#todayBtn').addEventListener('click', ()=>{ const d=new Date(); calYear=d.getFullYear(); calMonth=d.getMonth(); renderCalendar(); });
+
+  /* ---------- modal ---------- */
+  function setDirection(d){
+    direction = d;
+    $('#dirLong').classList.toggle('active', d==='long');
+    $('#dirShort').classList.toggle('active', d==='short');
+  }
+  function setOutcome(isMissed){
+    missed = isMissed;
+    $('#outcomeTaken').classList.toggle('active', !isMissed);
+    $('#outcomeTaken').classList.toggle('long', !isMissed);
+    $('#outcomeMissed').classList.toggle('active', isMissed);
+    $('#outcomeMissed').classList.toggle('missed', isMissed);
+    $('#f-pnl').placeholder = isMissed ? 'Optional for a missed entry' : '0.00';
+    $('#pnlField label').textContent = isMissed ? 'P&L ($) — optional' : 'P&L ($)';
+  }
+  function renderShotGrid(){
+    $('#shotGrid').innerHTML = pendingShots.map((s,i)=>`
+      <div class="shot-thumb"><img src="${s}"><div class="rm" data-i="${i}">✕</div></div>
+    `).join('');
+    $('#shotGrid').querySelectorAll('.rm').forEach(el=>{
+      el.addEventListener('click', ()=>{ pendingShots.splice(Number(el.dataset.i),1); renderShotGrid(); });
+    });
+  }
+  function compressImage(file){
+    return new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = ev=>{
+        const img = new Image();
+        img.onload = ()=>{
+          const maxW = 900;
+          const scale = Math.min(1, maxW / img.width);
+          const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img,0,0,w,h);
+          let quality = 0.6, dataUrl = canvas.toDataURL('image/jpeg', quality);
+          while(dataUrl.length > 220000 && quality > 0.2){ quality -= 0.1; dataUrl = canvas.toDataURL('image/jpeg', quality); }
+          resolve(dataUrl);
+        };
+        img.onerror = reject; img.src = ev.target.result;
+      };
+      reader.onerror = reject; reader.readAsDataURL(file);
+    });
+  }
+  async function handlePasteFiles(files){
+    for(const file of files){
+      if(pendingShots.length >= 6){ $('#modalError').textContent = 'Up to 6 screenshots per trade.'; break; }
+      try{ pendingShots.push(await compressImage(file)); }catch(e){}
+    }
+    renderShotGrid();
+  }
+  $('#pasteZone').addEventListener('paste', e=>{
+    e.preventDefault();
+    const items = (e.clipboardData || window.clipboardData).items;
+    const files = [];
+    for(const item of items){ if(item.type.startsWith('image/')) files.push(item.getAsFile()); }
+    if(files.length) handlePasteFiles(files);
+  });
+  // also allow paste anywhere while modal is open, in case zone isn't focused
+  document.addEventListener('paste', e=>{
+    if(!$('#modalOverlay').classList.contains('open')) return;
+    if(e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+    const items = (e.clipboardData || window.clipboardData).items;
+    const files = [];
+    for(const item of items){ if(item.type.startsWith('image/')) files.push(item.getAsFile()); }
+    if(files.length){ e.preventDefault(); handlePasteFiles(files); }
+  });
+
+  function openModal(id, presetDate){
+    editingId = id || null;
+    pendingShots = [];
+    $('#modalError').textContent = '';
+    $('#modalTitle').textContent = id ? 'Edit trade' : 'Log a trade';
+    if(id){
+      const t = trades.find(x=>x.id===id);
+      $('#f-date').value = t.date;
+      $('#f-time').value = t.time || '';
+      $('#f-instrument').value = t.instrument || 'MNQ';
+      setDirection(t.direction || 'long');
+      setOutcome(!!t.missed);
+      $('#f-rr').value = t.rr ?? '';
+      $('#f-pnl').value = t.pnl ?? '';
+      $('#f-strategy').value = t.strategy || '';
+      $('#f-trigger').value = t.entryTrigger || '';
+      $('#f-notes').value = t.notes || '';
+      pendingShots = (t.shots || []).slice();
+    } else {
+      $('#f-date').value = presetDate || selectedDate || new Date().toISOString().slice(0,10);
+      $('#f-time').value = '';
+      $('#f-instrument').value = 'MNQ';
+      setDirection('long');
+      setOutcome(false);
+      $('#f-rr').value = '';
+      $('#f-pnl').value = '';
+      $('#f-strategy').value = '';
+      $('#f-trigger').value = '';
+      $('#f-notes').value = '';
+    }
+    renderShotGrid();
+    $('#modalOverlay').classList.add('open');
+  }
+  function closeModal(){ $('#modalOverlay').classList.remove('open'); }
+
+  $('#newTradeBtn').addEventListener('click', ()=>openModal(null));
+  $('#closeModal').addEventListener('click', closeModal);
+  $('#cancelModal').addEventListener('click', closeModal);
+  $('#modalOverlay').addEventListener('click', e=>{ if(e.target.id==='modalOverlay') closeModal(); });
+  $('#dirLong').addEventListener('click', ()=>setDirection('long'));
+  $('#dirShort').addEventListener('click', ()=>setDirection('short'));
+  $('#outcomeTaken').addEventListener('click', ()=>setOutcome(false));
+  $('#outcomeMissed').addEventListener('click', ()=>setOutcome(true));
+
+  $('#saveTrade').addEventListener('click', async ()=>{
+    const uid = currentUid(); if(!uid) return;
+    const date = $('#f-date').value;
+    const pnlRaw = $('#f-pnl').value;
+    const pnlVal = pnlRaw !== '' ? parseFloat(pnlRaw) : null;
+    if(!date){ $('#modalError').textContent = 'Date is required.'; return; }
+    if(!missed && (pnlVal===null || isNaN(pnlVal))){ $('#modalError').textContent = 'P&L is required for a taken trade (or mark it as a missed entry).'; return; }
+    const record = {
+      date,
+      time: $('#f-time').value || null,
+      instrument: $('#f-instrument').value,
+      direction,
+      missed,
+      rr: $('#f-rr').value !== '' ? parseFloat($('#f-rr').value) : null,
+      pnl: pnlVal===null || isNaN(pnlVal) ? 0 : pnlVal,
+      strategy: $('#f-strategy').value.trim(),
+      entryTrigger: $('#f-trigger').value.trim(),
+      notes: $('#f-notes').value.trim(),
+      shots: pendingShots,
+      updatedAt: Date.now()
+    };
+    const col = db.collection('users').doc(uid).collection('trades');
+    try{
+      setSyncStatus('Saving…', true);
+      if(editingId) await col.doc(editingId).set(record);
+      else { record.createdAt = Date.now(); await col.add(record); }
+      closeModal();
+      setSyncStatus('Saved');
+    }catch(err){
+      $('#modalError').textContent = 'Could not save — ' + err.message;
+      setSyncStatus('Save failed', true);
+    }
+  });
+
+  $('#lightbox').addEventListener('click', ()=> $('#lightbox').classList.remove('open'));
+
+  renderCalendar(); renderDay();
+})();
+</script>
+</body>
+</html>
